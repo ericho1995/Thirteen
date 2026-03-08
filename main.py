@@ -15,15 +15,33 @@ class ThirteenGame:
         self.selected = []
         self.ai_players = [AIPlayer() for _ in range(3)]
         self.ui = UI()
-        self.message = "Click cards to select, then click play area"
+        self.message = "Select cards, then click Play. Click Pass to pass."
         self.game_over = False
         self.winner = None
+        self.passed_players = set()
+        self.last_player_to_play = 0
+        self.ui = UI()
+        self.reset_game()
+
+    def reset_game(self):
+        self.deck = Deck()
+        self.deck.shuffle()
+        self.hands = [Hand(self.deck.deal(13)) for _ in range(4)]
+        self.current_player = 0
+        self.prev_combo = []
+        self.selected = []
+        self.ai_players = [AIPlayer() for _ in range(3)]
+        self.message = "Select cards, then click Play. Click Pass to pass."
+        self.game_over = False
+        self.winner = None
+        self.passed_players = set()
+        self.last_player_to_play = 0
 
     def handle_mouse(self, pos):
         if self.game_over or self.current_player != 0:
             return
 
-        index, _ = self.ui.get_card_at_pos(self.hands[0], pos, self.selected)
+        index, _ = self.ui.get_card_at_pos(self.hands[0], pos)
         if index is not None:
             if index in self.selected:
                 self.selected.remove(index)
@@ -31,42 +49,86 @@ class ThirteenGame:
                 self.selected.append(index)
             return
 
-        if self.ui.play_area.collidepoint(pos) and self.selected:
-            play_combo = [self.hands[0].cards[i] for i in self.selected]
+        if self.ui.is_play_button_clicked(pos):
+            self.handle_play()
+            return
 
-            if is_valid_play(self.prev_combo, play_combo):
-                self.prev_combo = sorted(play_combo, key=lambda c: c.value)
+        if self.ui.is_pass_button_clicked(pos):
+            self.handle_pass()
+            return
+        
+        if self.ui.is_restart_button_clicked(pos):
+            self.reset_game()
+            return
 
-                for i in sorted(self.selected, reverse=True):
-                    del self.hands[0].cards[i]
+        if self.game_over or self.current_player != 0:
+            return
 
-                self.selected = []
-                self.message = "Played successfully"
+    def handle_play(self):
+        if not self.selected:
+            self.message = "No cards selected"
+            return
 
-                if len(self.hands[0].cards) == 0:
-                    self.game_over = True
-                    self.winner = "You"
-                    self.message = "You win!"
-                    return
+        play_combo = [self.hands[0].cards[i] for i in self.selected]
 
-                self.next_turn()
-            else:
-                self.message = "Invalid play"
+        if not is_valid_play(self.prev_combo, play_combo):
+            self.message = "Invalid play"
+            return
+
+        self.prev_combo = sorted(play_combo, key=lambda c: c.value)
+        self.hands[0].remove_cards(self.selected)
+        self.selected = []
+        self.passed_players = set()
+        self.last_player_to_play = 0
+        self.message = "You played"
+
+        if len(self.hands[0].cards) == 0:
+            self.game_over = True
+            self.winner = "You"
+            self.message = "You win!"
+            return
+
+        self.next_turn()
+
+    def handle_pass(self):
+        if not self.prev_combo:
+            self.message = "You cannot pass on a fresh trick"
+            return
+
+        self.passed_players.add(0)
+        self.selected = []
+        self.message = "You passed"
+        self.next_turn()
+
+    def reset_trick_if_needed(self):
+        active_players = [i for i in range(4) if len(self.hands[i].cards) > 0]
+        if len(self.passed_players) >= len(active_players) - 1:
+            self.prev_combo = []
+            self.passed_players = set()
+            self.current_player = self.last_player_to_play
+            self.message = f"Trick cleared. Player {self.current_player + 1} leads."
 
     def next_turn(self):
-        self.current_player = (self.current_player + 1) % 4
+        while not self.game_over:
+            self.current_player = (self.current_player + 1) % 4
 
-        while self.current_player != 0 and not self.game_over:
+            if len(self.hands[self.current_player].cards) == 0:
+                continue
+
+            self.reset_trick_if_needed()
+
+            if self.current_player == 0:
+                return
+
             ai_index = self.current_player - 1
             ai_hand = self.hands[self.current_player]
             ai_play = self.ai_players[ai_index].choose_play(ai_hand, self.prev_combo)
 
             if ai_play:
                 self.prev_combo = sorted(ai_play, key=lambda c: c.value)
-
-                for card in ai_play:
-                    ai_hand.cards.remove(card)
-
+                ai_hand.remove_card_objects(ai_play)
+                self.passed_players = set()
+                self.last_player_to_play = self.current_player
                 self.message = f"Player {self.current_player + 1} played"
 
                 if len(ai_hand.cards) == 0:
@@ -75,9 +137,20 @@ class ThirteenGame:
                     self.message = f"{self.winner} wins!"
                     return
             else:
+                self.passed_players.add(self.current_player)
                 self.message = f"Player {self.current_player + 1} passed"
 
-            self.current_player = (self.current_player + 1) % 4
+            active_players = [i for i in range(4) if len(self.hands[i].cards) > 0]
+            if len(self.passed_players) >= len(active_players) - 1:
+                self.prev_combo = []
+                self.passed_players = set()
+                self.current_player = self.last_player_to_play
+
+                if self.current_player == 0:
+                    self.message = "Trick cleared. Your lead."
+                    return
+                else:
+                    self.message = f"Trick cleared. Player {self.current_player + 1} leads."
 
     def run(self):
         running = True
