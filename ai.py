@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 from cards import Hand, Card, ComboType
 from rules import (
     get_combo_type,
@@ -64,7 +64,6 @@ class AIPlayer:
         after = self.evaluate_hand(remaining_cards)
 
         score = 0.0
-
         score += (after["structure_score"] - before["structure_score"]) * 8.0
         score -= after["dead_high_cards"] * 1.2
         score -= after["singles"] * 0.9
@@ -148,9 +147,7 @@ class AIPlayer:
         rank = combo_rank(combo)
         combo_type = get_combo_type(combo)
 
-        if combo_type == ComboType.SINGLE:
-            return rank[0] + rank[1] * 0.1
-        if combo_type in {ComboType.PAIR, ComboType.TRIPLE, ComboType.QUAD}:
+        if combo_type in {ComboType.SINGLE, ComboType.PAIR, ComboType.TRIPLE, ComboType.QUAD}:
             return rank[0] + rank[1] * 0.1
         if combo_type == ComboType.STRAIGHT:
             return rank[0] + rank[1] * 0.1 + rank[2] * 0.3

@@ -3,7 +3,8 @@ from typing import List, Tuple, Optional
 from cards import Card, Hand
 from config import (
     SCREEN_WIDTH, SCREEN_HEIGHT, MIN_WIDTH, MIN_HEIGHT,
-    CARD_WIDTH, CARD_HEIGHT, COLORS
+    CARD_WIDTH, CARD_HEIGHT, COLORS, DEFAULT_PANEL_MARGIN,
+    BOARD_WIDTH_RATIO, BOARD_WIDTH_MAX, BOARD_HEIGHT_RATIO, BOARD_SIDE_RESERVE
 )
 
 
@@ -55,12 +56,17 @@ class UI:
         self.screen = pygame.display.set_mode((self.width, self.height), pygame.RESIZABLE)
         self.update_layout()
 
+    def default_history_panel_position(self, width: int, height: int, panel_w: int, panel_h: int):
+        x = width - panel_w - DEFAULT_PANEL_MARGIN
+        y = height - panel_h - DEFAULT_PANEL_MARGIN
+        return self.clamp_history_panel_position(x, y, panel_w, panel_h)
+
     def update_layout(self):
         self.hand_y = self.height - 170
 
-        side_reserve = 220
-        board_w = min(520, int(self.width * 0.34))
-        board_h = int(self.height * 0.23)
+        side_reserve = BOARD_SIDE_RESERVE
+        board_w = min(BOARD_WIDTH_MAX, int(self.width * BOARD_WIDTH_RATIO))
+        board_h = int(self.height * BOARD_HEIGHT_RATIO)
 
         available_left = 40
         available_right = self.width - side_reserve - 40
@@ -68,11 +74,10 @@ class UI:
 
         self.play_area = pygame.Rect(
             board_x,
-            int(self.height * 0.34),
+            int(self.height * 0.30),
             board_w,
             board_h
         )
-
 
         button_w = 130
         button_h = 48
@@ -81,6 +86,7 @@ class UI:
 
         self.play_button = pygame.Rect(center_x - button_w - 10, action_y, button_w, button_h)
         self.pass_button = pygame.Rect(center_x + 10, action_y, button_w, button_h)
+        self.deal_button = pygame.Rect(center_x - 75, action_y, 150, button_h)
         self.new_game_button = pygame.Rect(self.width - 180, self.toolbar_height + 14, 150, 40)
 
         self.toolbar_rect = pygame.Rect(0, 0, self.width, self.toolbar_height)
@@ -229,20 +235,6 @@ class UI:
         top = panel.y + 122
         return pygame.Rect(panel.x + 14, top, panel.width - 28, panel.bottom - top - 14)
 
-    def get_sorted_standings(self, win_counts: dict):
-        return sorted(win_counts.items(), key=lambda item: (-item[1], item[0]))
-
-    def get_leader(self, win_counts: dict):
-        if not win_counts:
-            return None
-        top_score = max(win_counts.values())
-        if top_score <= 0:
-            return None
-        leaders = [name for name, score in win_counts.items() if score == top_score]
-        if len(leaders) != 1:
-            return None
-        return leaders[0], top_score
-
     def wrap_text_lines(self, text: str, max_width: int):
         words = text.split(" ")
         lines = []
@@ -300,7 +292,6 @@ class UI:
             font = self.card_suit_font if is_symbol else self.font
             if line_height <= 22:
                 font = self.card_suit_font if is_symbol else self.small_font
-
             surface = font.render(chunk, True, color)
             draw_y = y + (line_height - surface.get_height()) // 2
             self.screen.blit(surface, (cursor_x, draw_y))
@@ -362,6 +353,25 @@ class UI:
         history_rect = section_rects.get("history")
         return history_rect is not None and history_rect.collidepoint(pos)
 
+    def is_standings_body_hovered(
+        self,
+        pos: Tuple[int, int],
+        win_counts: dict,
+        standings_visible: bool,
+        recent_plays_visible: bool,
+        history_visible: bool,
+        history_width: int,
+        history_height: int,
+        history_pos: Tuple[int, int]
+    ):
+        content = self.panel_content_rect(history_visible, history_width, history_height, history_pos)
+        if content is None:
+            return False
+
+        section_rects = self.compute_section_layout(content, standings_visible, recent_plays_visible)
+        standings_rect = section_rects.get("standings")
+        return standings_rect is not None and standings_rect.collidepoint(pos)
+
     def max_history_scroll(
         self,
         history_log: List[str],
@@ -399,6 +409,40 @@ class UI:
         content_height = len(wrapped_lines) * line_height + top_padding + bottom_padding
         return max(0, content_height - history_rect.height)
 
+    def max_standings_scroll(
+        self,
+        win_counts: dict,
+        standings_visible: bool,
+        recent_plays_visible: bool,
+        history_visible: bool,
+        history_width: int,
+        history_height: int,
+        history_pos: Tuple[int, int]
+    ):
+        if not standings_visible:
+            return 0
+
+        content = self.panel_content_rect(history_visible, history_width, history_height, history_pos)
+        if content is None:
+            return 0
+
+        section_rects = self.compute_section_layout(content, standings_visible, recent_plays_visible)
+        standings_rect = section_rects.get("standings")
+        if standings_rect is None:
+            return 0
+
+        rows = sorted(win_counts.items(), key=lambda item: (-item[1], item[0]))
+        top_score = max(win_counts.values()) if win_counts else 0
+        leader_height = 30 if top_score <= 0 else 40
+
+        top_padding = 4
+        bottom_padding = 8
+        title_block = 38
+        content_height = title_block + top_padding + leader_height + len(rows) * 32 + bottom_padding
+
+        body_height = standings_rect.height - 44
+        return max(0, content_height - body_height)
+
     def draw_scrollbar(self, body_rect: pygame.Rect, content_height: int, scroll: int):
         if content_height <= body_rect.height:
             return
@@ -413,24 +457,37 @@ class UI:
         thumb = pygame.Rect(track.x, thumb_y, track.width, thumb_h)
         pygame.draw.rect(self.screen, COLORS["scroll_thumb"], thumb, border_radius=4)
 
-    def draw_standings_section(self, rect: pygame.Rect, win_counts: dict):
+    def draw_standings_section(self, rect: pygame.Rect, win_counts: dict, standings_scroll: int):
         self.draw_rounded_rect((34, 40, 46), rect, radius=10)
         pygame.draw.rect(self.screen, COLORS["panel_border"], rect, 1, border_radius=10)
 
         title = self.score_title_font.render("Match Standings", True, COLORS["active_name"])
         self.screen.blit(title, (rect.x + 12, rect.y + 10))
 
-        rows = self.get_sorted_standings(win_counts)
-        leader = self.get_leader(win_counts)
-        row_y = rect.y + 42
+        body = pygame.Rect(rect.x + 6, rect.y + 38, rect.width - 12, rect.height - 44)
+        if body.height <= 20:
+            return
+
+        rows = sorted(win_counts.items(), key=lambda item: (-item[1], item[0]))
+        top_score = max(win_counts.values()) if win_counts else 0
+        leader = None
+        if top_score > 0:
+            leaders = [name for name, score in win_counts.items() if score == top_score]
+            if len(leaders) == 1:
+                leader = (leaders[0], top_score)
+
+        clip_prev = self.screen.get_clip()
+        self.screen.set_clip(body)
+
+        row_y = body.y + 4 - standings_scroll
 
         if leader is None:
             leader_text = self.small_font.render("Leader: None yet", True, COLORS["muted_text"])
-            self.screen.blit(leader_text, (rect.x + 12, row_y))
+            self.screen.blit(leader_text, (body.x + 8, row_y))
             row_y += 30
         else:
             leader_name, leader_score = leader
-            leader_badge = pygame.Rect(rect.x + 12, row_y, rect.width - 24, 32)
+            leader_badge = pygame.Rect(body.x + 6, row_y, body.width - 18, 32)
             self.draw_rounded_rect((54, 68, 58), leader_badge, radius=8)
             self.draw_rounded_rect((120, 155, 120), leader_badge, radius=8, width=1)
 
@@ -441,10 +498,7 @@ class UI:
             row_y += 40
 
         for idx, (name, wins) in enumerate(rows, start=1):
-            if row_y + 28 > rect.bottom - 8:
-                break
-
-            row_rect = pygame.Rect(rect.x + 12, row_y, rect.width - 24, 28)
+            row_rect = pygame.Rect(body.x + 6, row_y, body.width - 18, 28)
             fill = (38, 44, 50) if idx % 2 else (33, 39, 45)
             self.draw_rounded_rect(fill, row_rect, radius=8)
 
@@ -456,6 +510,13 @@ class UI:
             self.screen.blit(name_text, (row_rect.x + 34, row_rect.y + 5))
             self.screen.blit(wins_text, (row_rect.right - 12 - wins_text.get_width(), row_rect.y + 5))
             row_y += 32
+
+        self.screen.set_clip(clip_prev)
+        pygame.draw.rect(self.screen, COLORS["panel_border"], body, 1, border_radius=6)
+
+        leader_height = 30 if leader is None else 40
+        content_height = leader_height + len(rows) * 32 + 8
+        self.draw_scrollbar(body, content_height, standings_scroll)
 
     def draw_history_section(self, rect: pygame.Rect, history_log: List[str], history_scroll: int):
         self.draw_rounded_rect((34, 40, 46), rect, radius=10)
@@ -497,6 +558,7 @@ class UI:
         self,
         history_log: List[str],
         history_scroll: int,
+        standings_scroll: int,
         win_counts: dict,
         standings_visible: bool,
         recent_plays_visible: bool,
@@ -528,12 +590,12 @@ class UI:
         self.draw_rounded_rect((38, 44, 50), history_toggle, radius=8)
 
         standings_label = self.small_font.render(
-            f"Standings [ON]" if standings_visible else "Standings [OFF]",
+            "Standings [ON]" if standings_visible else "Standings [OFF]",
             True,
             COLORS["active_name"] if standings_visible else COLORS["muted_text"]
         )
         history_label = self.small_font.render(
-            f"History [ON]" if recent_plays_visible else "History [OFF]",
+            "History [ON]" if recent_plays_visible else "History [OFF]",
             True,
             COLORS["active_name"] if recent_plays_visible else COLORS["muted_text"]
         )
@@ -547,7 +609,7 @@ class UI:
         section_rects = self.compute_section_layout(content_rect, standings_visible, recent_plays_visible)
 
         if "standings" in section_rects:
-            self.draw_standings_section(section_rects["standings"], win_counts)
+            self.draw_standings_section(section_rects["standings"], win_counts, standings_scroll)
 
         if "history" in section_rects:
             self.draw_history_section(section_rects["history"], history_log, history_scroll)
@@ -572,6 +634,49 @@ class UI:
             rect = pygame.Rect(int(x), int(y), CARD_WIDTH, CARD_HEIGHT)
             self.draw_card(card, rect)
 
+    def get_deck_position(self):
+        return (self.play_area.centerx - CARD_WIDTH // 2, self.play_area.centery - CARD_HEIGHT // 2)
+
+    def get_deal_target_rect(self, player_index: int, card_index: int):
+        if player_index == 0:
+            spacing = 18
+            start_x = self.width // 2 - 120
+            return pygame.Rect(start_x + card_index * spacing, self.hand_y, CARD_WIDTH, CARD_HEIGHT)
+
+        if player_index == 2:
+            spacing = 12
+            start_x = self.width // 2 - 90
+            y = self.toolbar_height + 54
+            return pygame.Rect(start_x + card_index * spacing, y, 55, 80)
+
+        if player_index == 1:
+            x = 40
+            y = self.toolbar_height + 158 + card_index * 12
+            return pygame.Rect(x, y, 55, 80)
+
+        x = self.width - 95
+        y = self.toolbar_height + 158 + card_index * 12
+        return pygame.Rect(x, y, 55, 80)
+
+    def draw_deck_stack(self):
+        deck_x, deck_y = self.get_deck_position()
+        for offset in range(3, -1, -1):
+            rect = pygame.Rect(deck_x - offset * 2, deck_y - offset * 2, CARD_WIDTH, CARD_HEIGHT)
+            self.draw_card_back(rect)
+
+    def draw_deal_animation(self, deal_animation):
+        if not deal_animation:
+            return
+
+        start_x, start_y = deal_animation["start_pos"]
+        target_rect = deal_animation["target_rect"]
+        progress = deal_animation["progress"]
+
+        x = start_x + (target_rect.x - start_x) * progress
+        y = start_y + (target_rect.y - start_y) * progress
+        rect = pygame.Rect(int(x), int(y), target_rect.width, target_rect.height)
+        self.draw_card_back(rect)
+
     def draw_ui(self, model: dict):
         hands = model["hands"]
         player_names = model["player_names"]
@@ -580,6 +685,7 @@ class UI:
         selected = model["selected"]
         history_log = model["history_log"]
         history_scroll = model["history_scroll"]
+        standings_scroll = model["standings_scroll"]
         win_counts = model["win_counts"]
         history_visible = model["history_visible"]
         history_width = model["history_width"]
@@ -590,6 +696,9 @@ class UI:
         game_over = model["game_over"]
         standings_visible = model["standings_visible"]
         recent_plays_visible = model["recent_plays_visible"]
+        deal_ready = model["deal_ready"]
+        deal_in_progress = model["deal_in_progress"]
+        deal_animation = model["deal_animation"]
 
         self.draw_background()
         self.draw_toolbar()
@@ -635,10 +744,18 @@ class UI:
         )
 
         self.draw_play_area(prev_combo, active_animation)
+
+        if deal_ready or deal_in_progress:
+            self.draw_deck_stack()
+            self.draw_deal_animation(deal_animation)
+
         self.draw_active_animation(active_animation)
 
-        self.draw_button(self.play_button, "Play")
-        self.draw_button(self.pass_button, "Pass", alt=True)
+        if deal_ready:
+            self.draw_button(self.deal_button, "Deal")
+        else:
+            self.draw_button(self.play_button, "Play")
+            self.draw_button(self.pass_button, "Pass", alt=True)
 
         if game_over:
             self.draw_button(self.new_game_button, "New Game", alt=True)
@@ -646,6 +763,7 @@ class UI:
         self.draw_history_panel(
             history_log,
             history_scroll,
+            standings_scroll,
             win_counts,
             standings_visible,
             recent_plays_visible,
@@ -658,8 +776,8 @@ class UI:
         if message:
             self.draw_mixed_status_text(message, 40, self.height - 220, COLORS["message"], 28)
 
-        self.draw_mixed_status_text("Select cards, then click Play", 40, self.height - 190, COLORS["muted_text"], 22)
-
+        hint_text = "Click Deal to start" if deal_ready else "Select cards, then click Play"
+        self.draw_mixed_status_text(hint_text, 40, self.height - 190, COLORS["muted_text"], 22)
 
         pygame.display.flip()
 
@@ -701,6 +819,9 @@ class UI:
     def is_pass_button_clicked(self, pos: Tuple[int, int]) -> bool:
         return self.pass_button.collidepoint(pos)
 
+    def is_deal_button_clicked(self, pos: Tuple[int, int]) -> bool:
+        return self.deal_button.collidepoint(pos)
+
     def is_new_game_button_clicked(self, pos: Tuple[int, int]) -> bool:
         return self.new_game_button.collidepoint(pos)
 
@@ -735,11 +856,171 @@ class UI:
         return self.history_toggle_rect(history_width, history_height, history_pos).collidepoint(pos)
 
     def compute_history_size_from_mouse(self, mouse_pos: Tuple[int, int], history_pos: Tuple[int, int], current_w: int, current_h: int):
-        new_w = mouse_pos[0] - history_pos[0]
-        new_h = mouse_pos[1] - history_pos[1]
-        return new_w, new_h
+        return mouse_pos[0] - history_pos[0], mouse_pos[1] - history_pos[1]
 
     def clamp_history_panel_position(self, x: int, y: int, width: int, height: int):
         x = max(20, min(self.width - width - 20, x))
         y = max(self.toolbar_height + 12, min(self.height - height - 20, y))
         return (x, y)
+
+    def get_scrollbar_rects(self, body_rect: pygame.Rect, content_height: int, scroll: int):
+        if content_height <= body_rect.height:
+            return None, None
+
+        track = pygame.Rect(body_rect.right - 8, body_rect.y, 8, body_rect.height)
+
+        ratio = body_rect.height / content_height
+        thumb_h = max(26, int(track.height * ratio))
+        max_thumb_y = track.height - thumb_h
+        scroll_range = max(1, content_height - body_rect.height)
+        thumb_y = track.y + int((scroll / scroll_range) * max_thumb_y)
+
+        thumb = pygame.Rect(track.x, thumb_y, track.width, thumb_h)
+        return track, thumb
+
+    def scroll_from_track_click(self, mouse_y: int, body_rect: pygame.Rect, content_height: int):
+        track, thumb = self.get_scrollbar_rects(body_rect, content_height, 0)
+        if track is None or thumb is None:
+            return 0
+
+        thumb_centered_y = mouse_y - thumb.height // 2
+        min_y = track.y
+        max_y = track.bottom - thumb.height
+        thumb_y = max(min_y, min(max_y, thumb_centered_y))
+
+        max_thumb_travel = max(1, track.height - thumb.height)
+        thumb_progress = (thumb_y - track.y) / max_thumb_travel
+        max_scroll = max(0, content_height - body_rect.height)
+        return int(thumb_progress * max_scroll)
+
+    def scroll_from_thumb_drag(self, mouse_y: int, track: pygame.Rect, thumb: pygame.Rect, content_height: int, body_height: int, drag_offset_y: int):
+        thumb_y = mouse_y - drag_offset_y
+        min_y = track.y
+        max_y = track.bottom - thumb.height
+        thumb_y = max(min_y, min(max_y, thumb_y))
+
+        max_thumb_travel = max(1, track.height - thumb.height)
+        thumb_progress = (thumb_y - track.y) / max_thumb_travel
+        max_scroll = max(0, content_height - body_height)
+        return int(thumb_progress * max_scroll)
+
+    def standings_body_rect(
+        self,
+        win_counts: dict,
+        standings_visible: bool,
+        recent_plays_visible: bool,
+        history_visible: bool,
+        history_width: int,
+        history_height: int,
+        history_pos: Tuple[int, int]
+    ):
+        content = self.panel_content_rect(history_visible, history_width, history_height, history_pos)
+        if content is None:
+            return None
+
+        section_rects = self.compute_section_layout(content, standings_visible, recent_plays_visible)
+        standings_rect = section_rects.get("standings")
+        if standings_rect is None:
+            return None
+
+        return pygame.Rect(standings_rect.x + 6, standings_rect.y + 38, standings_rect.width - 12, standings_rect.height - 44)
+
+    def standings_content_height(self, win_counts: dict):
+        rows = sorted(win_counts.items(), key=lambda item: (-item[1], item[0]))
+        top_score = max(win_counts.values()) if win_counts else 0
+        leader_height = 30 if top_score <= 0 else 40
+        top_padding = 4
+        bottom_padding = 8
+        return top_padding + leader_height + len(rows) * 32 + bottom_padding
+
+    def standings_scrollbar_rects(
+        self,
+        win_counts: dict,
+        standings_scroll: int,
+        standings_visible: bool,
+        recent_plays_visible: bool,
+        history_visible: bool,
+        history_width: int,
+        history_height: int,
+        history_pos: Tuple[int, int]
+    ):
+        body = self.standings_body_rect(
+            win_counts,
+            standings_visible,
+            recent_plays_visible,
+            history_visible,
+            history_width,
+            history_height,
+            history_pos
+        )
+        if body is None:
+            return None, None, None, None
+
+        content_height = self.standings_content_height(win_counts)
+        track, thumb = self.get_scrollbar_rects(body, content_height, standings_scroll)
+        return body, content_height, track, thumb
+
+    def history_body_rect(
+        self,
+        history_log: List[str],
+        win_counts: dict,
+        standings_visible: bool,
+        recent_plays_visible: bool,
+        history_visible: bool,
+        history_width: int,
+        history_height: int,
+        history_pos: Tuple[int, int]
+    ):
+        content = self.panel_content_rect(history_visible, history_width, history_height, history_pos)
+        if content is None:
+            return None
+
+        section_rects = self.compute_section_layout(content, standings_visible, recent_plays_visible)
+        history_rect = section_rects.get("history")
+        if history_rect is None:
+            return None
+
+        return pygame.Rect(history_rect.x + 6, history_rect.y + 38, history_rect.width - 12, history_rect.height - 44)
+
+    def history_content_height(self, history_log: List[str], body_rect: pygame.Rect):
+        left_padding = 10
+        right_padding = 12
+        top_padding = 8
+        bottom_padding = 8
+        text_width = body_rect.width - left_padding - right_padding - 8
+
+        log_lines = []
+        for entry in history_log:
+            log_lines.extend(self.wrap_text_lines(entry, text_width))
+
+        line_height = 24
+        return len(log_lines) * line_height + top_padding + bottom_padding
+
+    def history_scrollbar_rects(
+        self,
+        history_log: List[str],
+        history_scroll: int,
+        win_counts: dict,
+        standings_visible: bool,
+        recent_plays_visible: bool,
+        history_visible: bool,
+        history_width: int,
+        history_height: int,
+        history_pos: Tuple[int, int]
+    ):
+        body = self.history_body_rect(
+            history_log,
+            win_counts,
+            standings_visible,
+            recent_plays_visible,
+            history_visible,
+            history_width,
+            history_height,
+            history_pos
+        )
+        if body is None:
+            return None, None, None, None
+
+        content_height = self.history_content_height(history_log, body)
+        track, thumb = self.get_scrollbar_rects(body, content_height, history_scroll)
+        return body, content_height, track, thumb

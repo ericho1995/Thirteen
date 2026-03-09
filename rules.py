@@ -36,7 +36,10 @@ def get_combo_type(combo: List[Card]) -> Optional[ComboType]:
     if len(combo) >= 3:
         if 15 in values:
             return None
-        if len(set(values)) == len(values) and all(values[i] + 1 == values[i + 1] for i in range(len(values) - 1)):
+        is_run = len(set(values)) == len(values) and all(
+            values[i] + 1 == values[i + 1] for i in range(len(values) - 1)
+        )
+        if is_run:
             return ComboType.STRAIGHT
 
     return None
@@ -61,7 +64,7 @@ def combo_rank(combo: List[Card]):
 
 
 def combo_contains_three_spades(combo: List[Card]) -> bool:
-    return any(card.rank == "3" and card.suit == "♠" for card in combo)
+    return any(card.is_three_of_spades() for card in combo)
 
 
 def is_valid_play(prev_combo: List[Card], play_combo: List[Card]) -> bool:

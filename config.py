@@ -2,11 +2,13 @@ SCREEN_WIDTH = 1400
 SCREEN_HEIGHT = 900
 MIN_WIDTH = 1100
 MIN_HEIGHT = 720
+FPS = 60
 
 CARD_WIDTH = 90
 CARD_HEIGHT = 130
 
-FPS = 60
+CARD_SUITS = ["♠", "♣", "♦", "♥"]
+CARD_RANKS = ["3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A", "2"]
 
 SUIT_ORDER = {
     "♠": 1,
@@ -32,10 +34,28 @@ RANK_ORDER = {
 }
 
 PLAYER_NAME_POOL = [
-    "Mia", "Ethan", "Zoe", "Lucas", "Ava", "Noah",
-    "Chloe", "Liam", "Sophie", "Jack", "Ella", "Leo",
+    "Mia", "Ethan", "Zoe", "Lucas",
+    "Ava", "Noah", "Chloe", "Liam",
+    "Sophie", "Jack", "Ella", "Leo",
     "Nina", "Oscar", "Ruby", "Max",
 ]
+
+DEFAULT_PANEL_WIDTH = 320
+DEFAULT_PANEL_HEIGHT = 320
+DEFAULT_PANEL_MARGIN = 20
+MIN_PANEL_WIDTH = 240
+MIN_PANEL_HEIGHT = 240
+MAX_PANEL_WIDTH_RATIO = 0.42
+MAX_PANEL_HEIGHT_RATIO = 0.78
+
+BOARD_WIDTH_RATIO = 0.42
+BOARD_WIDTH_MAX = 620
+BOARD_HEIGHT_RATIO = 0.27
+BOARD_SIDE_RESERVE = 180
+
+DEAL_ANIMATION_DURATION = 0.06
+DEAL_START_DELAY = 0.01
+SCROLL_STEP = 28
 
 COLORS = {
     "bg_top": (20, 70, 50),
