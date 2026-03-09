@@ -1,25 +1,14 @@
-"""Thirteen Game - Rules & AI"""
-from typing import List, Optional
-from enum import Enum
 from itertools import combinations
-from cards import Card, ComboType, Hand
-
-SUIT_ORDER = {"♠": 1, "♣": 2, "♦": 3, "♥": 4}
-
-
-class GameState(Enum):
-    PLAYER_TURN = "player_turn"
-    AI_TURN = "ai_turn"
-    PASSED = "passed"
-    WINNER = "winner"
+from typing import List, Optional
+from cards import Card, ComboType
 
 
 def card_sort_key(card: Card):
-    return (card.value, SUIT_ORDER.get(card.suit, 0))
+    return card.sort_key()
 
 
 def display_sort_key(card: Card):
-    return (-card.value, -SUIT_ORDER.get(card.suit, 0))
+    return card.display_sort_key()
 
 
 def sorted_combo(combo: List[Card]) -> List[Card]:
@@ -59,17 +48,16 @@ def combo_rank(combo: List[Card]):
 
     if combo_type == ComboType.SINGLE:
         c = combo[0]
-        return (c.value, SUIT_ORDER[c.suit])
+        return (c.value, c.suit_value)
 
     if combo_type in {ComboType.PAIR, ComboType.TRIPLE, ComboType.QUAD}:
-        highest_suit = max(SUIT_ORDER[c.suit] for c in combo)
-        return (combo[0].value, highest_suit)
+        return (combo[0].value, max(card.suit_value for card in combo))
 
     if combo_type == ComboType.STRAIGHT:
         high = combo[-1]
-        return (high.value, SUIT_ORDER[high.suit], len(combo))
+        return (high.value, high.suit_value, len(combo))
 
-    return (-1, -1)
+    return (-1, -1, -1)
 
 
 def combo_contains_three_spades(combo: List[Card]) -> bool:
@@ -111,24 +99,20 @@ def find_quads(cards: List[Card]) -> List[List[Card]]:
 
 def find_straights(cards: List[Card], min_length: int = 3, max_length: int = 6) -> List[List[Card]]:
     straights = []
-    unique_cards = {}
+    grouped = {}
 
     for card in sorted(cards, key=card_sort_key):
         if card.value == 15:
             continue
-        if card.value not in unique_cards:
-            unique_cards[card.value] = []
-        unique_cards[card.value].append(card)
+        grouped.setdefault(card.value, []).append(card)
 
-    unique_values = sorted(unique_cards.keys())
+    values = sorted(grouped.keys())
 
     for size in range(min_length, max_length + 1):
-        for i in range(len(unique_values) - size + 1):
-            run = unique_values[i:i + size]
+        for i in range(len(values) - size + 1):
+            run = values[i:i + size]
             if all(run[j] + 1 == run[j + 1] for j in range(len(run) - 1)):
-                chosen = []
-                for value in run:
-                    chosen.append(sorted(unique_cards[value], key=lambda c: SUIT_ORDER[c.suit])[0])
+                chosen = [sorted(grouped[v], key=card_sort_key)[0] for v in run]
                 if get_combo_type(chosen) == ComboType.STRAIGHT:
                     straights.append(sorted_combo(chosen))
 
@@ -151,48 +135,5 @@ def generate_all_valid_combos(cards: List[Card]) -> List[List[Card]]:
         if key not in seen:
             seen.add(key)
             deduped.append(combo)
+
     return deduped
-
-
-class AIPlayer:
-    def __init__(self, difficulty: str = "medium"):
-        self.difficulty = difficulty
-
-    def lead_sort_key(self, combo: List[Card]):
-        combo_type = get_combo_type(combo)
-        type_priority = {
-            ComboType.SINGLE: 0,
-            ComboType.PAIR: 1,
-            ComboType.TRIPLE: 2,
-            ComboType.STRAIGHT: 3,
-            ComboType.QUAD: 4,
-        }.get(combo_type, 99)
-        return (type_priority, len(combo), combo_rank(combo))
-
-    def response_sort_key(self, combo: List[Card]):
-        return (combo_rank(combo), len(combo))
-
-    def choose_play(
-        self,
-        hand: Hand,
-        prev_combo: List[Card],
-        must_contain_three_spades: bool = False
-    ) -> List[Card]:
-        possible = self.find_valid_plays(hand.cards, prev_combo)
-
-        if must_contain_three_spades:
-            possible = [combo for combo in possible if combo_contains_three_spades(combo)]
-
-        if not possible:
-            return []
-
-        if not prev_combo:
-            possible.sort(key=self.lead_sort_key)
-            return possible[0]
-
-        possible.sort(key=self.response_sort_key)
-        return possible[0]
-
-    def find_valid_plays(self, cards: List[Card], prev_combo: List[Card]) -> List[List[Card]]:
-        all_combos = generate_all_valid_combos(cards)
-        return [combo for combo in all_combos if is_valid_play(prev_combo, combo)]

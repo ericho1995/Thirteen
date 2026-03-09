@@ -1,26 +1,8 @@
-"""Thirteen Game - Cards Module"""
-from typing import List
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import random
-
-
-RANKS = ['3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A', '2']
-SUITS = ['♠', '♥', '♦', '♣']
-VALUES = {r: i + 3 for i, r in enumerate(RANKS)}
-
-
-@dataclass(frozen=True)
-class Card:
-    rank: str
-    suit: str
-    value: int
-
-    def __str__(self):
-        return f"{self.rank}{self.suit}"
-
-    def __repr__(self):
-        return self.__str__()
+from typing import List
+from config import SUIT_ORDER, RANK_ORDER
 
 
 class ComboType(Enum):
@@ -31,42 +13,62 @@ class ComboType(Enum):
     STRAIGHT = "straight"
 
 
-class Deck:
-    def __init__(self):
-        self.cards: List[Card] = []
-        self.build_deck()
+@dataclass(frozen=True)
+class Card:
+    rank: str
+    suit: str
 
-    def build_deck(self):
-        self.cards = [Card(r, s, VALUES[r]) for r in RANKS for s in SUITS]
+    @property
+    def value(self) -> int:
+        return RANK_ORDER[self.rank]
+
+    @property
+    def suit_value(self) -> int:
+        return SUIT_ORDER[self.suit]
+
+    def sort_key(self):
+        return (self.value, self.suit_value)
+
+    def display_sort_key(self):
+        return (self.value, self.suit_value)
+
+
+    def __str__(self) -> str:
+        return f"{self.rank}{self.suit}"
+
+
+@dataclass
+class Deck:
+    cards: List[Card] = field(default_factory=list)
+
+    def __post_init__(self):
+        if not self.cards:
+            suits = ["♠", "♣", "♦", "♥"]
+            ranks = ["3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A", "2"]
+            self.cards = [Card(rank, suit) for suit in suits for rank in ranks]
 
     def shuffle(self):
         random.shuffle(self.cards)
 
-    def deal(self, num: int) -> List[Card]:
-        if num > len(self.cards):
-            raise ValueError(f"Not enough cards left to deal {num}")
-        return [self.cards.pop() for _ in range(num)]
+    def deal(self, count: int) -> List[Card]:
+        dealt = self.cards[:count]
+        self.cards = self.cards[count:]
+        return dealt
 
 
+@dataclass
 class Hand:
-    def __init__(self, cards: List[Card]):
-        self.cards = sorted(cards, key=lambda c: c.value)
+    cards: List[Card]
 
-    def __len__(self):
-        return len(self.cards)
-
-    def is_empty(self):
-        return len(self.cards) == 0
-
-    def sort(self):
-        self.cards.sort(key=lambda c: c.value)
+    def sort_for_display(self):
+        self.cards.sort(key=lambda c: c.display_sort_key())
 
     def remove_cards(self, indices: List[int]):
         for i in sorted(indices, reverse=True):
             del self.cards[i]
-        self.sort()
+        self.sort_for_display()
 
     def remove_card_objects(self, cards_to_remove: List[Card]):
-        for target in cards_to_remove:
-            self.cards.remove(target)
-        self.sort()
+        for card in cards_to_remove:
+            self.cards.remove(card)
+        self.sort_for_display()
