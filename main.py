@@ -1,10 +1,11 @@
+import asyncio
 import pygame
 from config import FPS
 from ui import UI
 from controller import GameController
 
 
-def main():
+async def main():
     ui = UI()
     controller = GameController(ui)
 
@@ -21,8 +22,10 @@ def main():
         controller.update(dt)
         ui.draw_ui(controller.view_model())
 
+        await asyncio.sleep(0)
+
     pygame.quit()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
